@@ -1,0 +1,703 @@
+---
+title: "Actividad N°3- Programación en R"
+subtitle: "Curso PF 0953-01"
+author: "Julieta Laucirica"
+toc: true
+format: 
+  html:
+    code-fold: true
+execute: 
+  echo: true
+theme: minty
+editor: visual
+lang: es
+---
+
+# Análisis del nicho biológico de la Danta Centroamericana (Tapirus bairdii)
+
+::: callout-note
+La Danta Centroamericana, como bien lo indica su nombre, encuentra su mayor presencia en Centroamérica. Es una especie de mamífero perisodáctilo de la familia de los tapíridos, una de las cuatro especies americanas que existen de tapir. Puebla las selvas tropicales existentes entre el sur mexicano al noroeste de Colombia, con presencia no confirmada en Ecuador.
+:::
+
+![](https://www.vamosaturistear.com/wp-content/webp-express/webp-images/uploads/2021/01/Danta-Parque-Nacional-Corcovado-Puntarenas-8-1-1024x697.jpg.webp)
+
+## Carga de librerías
+
+```{r}
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Colección de paquetes de Tidyverse
+library(tidyverse)
+
+# Estilos para ggplot2
+library(ggthemes)
+
+# Paletas de colores de RColorBrewer
+library(RColorBrewer)
+
+# Paletas de colores de viridis
+library(viridisLite)
+
+# Gráficos interactivos
+library(plotly)
+
+library(ggplot2)
+
+library(scales)
+
+# Manejo de datos vectoriales
+library(sf)
+
+# Manejo de datos raster
+library(terra)
+
+# Manejo de datos raster
+library(raster)
+
+# Mapas interactivos
+library(leaflet)
+
+# Acceso a datos en GBIF
+library(rgbif)
+
+#Guardar datos en la memoria cache
+library (memoise)
+
+# Datos geoespaciales
+library(geodata)
+
+# Modelado de distribución de especies
+library(dismo)
+
+```
+
+## Carga datos presencia
+
+```{r}
+#| label: carga-datos
+#| message: false
+#| warning: false
+#| collapse: true
+# Nombre de la especie
+especie <- "Tapirus bairdii"
+
+# Consulta a GBIF
+respuesta <- occ_search(
+  scientificName = especie, 
+  hasCoordinate = TRUE,
+  hasGeospatialIssue = FALSE,
+  limit = 10000
+)
+
+# Extraer datos de presencia
+presencia <- respuesta$data
+
+presencia <- st_as_sf(
+  presencia,
+  coords = c("decimalLongitude", "decimalLatitude"),
+  remove = FALSE, # conservar las columnas de las coordenadas
+  crs = 4326
+)
+```
+
+## Registros de presencia por pais
+
+```{r}
+#| label: presenciapais
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Gráfico ggplot2
+grafico_ggplot2 <-
+  presencia |>
+  st_drop_geometry() |>
+  ggplot(aes(x = fct_infreq(countryCode))) +
+  geom_bar(
+    aes(
+      text = paste0(
+        "Cantidad de registros de presencia: ", after_stat(count)
+      )
+    )    
+  ) +
+  ggtitle("Cantidad de registros de presencia por país") +
+  xlab("País") +
+  ylab("Cantidad de registros de presencia") +
+  labs(caption = "Fuente: GBIF") +
+  theme_economist()
+
+# Gráfico plotly
+ggplotly(grafico_ggplot2, tooltip = "text") |> 
+  config(locale = 'es')
+```
+
+```{r}
+#Consulta de valores únicos para la columna country
+valores_unicos <- unique(presencia$country)
+print(valores_unicos)
+```
+
+::: callout-note
+A partir del gráfico anterior, se observa que los países con mayor presencia de Dantas son Costa Rica y México. Por otro lado Guatemala, Belice, Panama, Honduras y Nicaragua son los países centroamericanos con menor cantidad de ejemplares. Una posibilidad en el caso de Colombia, es que se trate de los márgenes ambientales óptimos para esta especie. Por último, en Estados Unidos es totalmente atípica la presencia de estos ejemplares.
+:::
+
+## Registros de dantas según la altura de su observación
+
+```{r}
+#| label: datos_elevacion
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Usuario Geonames
+user <- "jlaucirica"
+
+# Obtener datos de elevación mediante la funcion elevation de RGBIF
+elevacion <- elevation(presencia, username = user)
+
+```
+
+
+```{r}
+#| label: presenciaaltitud
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Grafico de distribucion de dantas por altitud
+histograma_elevacion <- 
+  elevacion |>
+  ggplot(aes(x = elevation_geonames)) +
+  geom_histogram(
+    aes(
+      text = paste0(
+        "Altura (valor medio del rango): ", round(after_stat(x), 2), " m\n",
+        "Frecuencia: ", after_stat(count)
+      )
+    ), 
+    bins = 6
+  )  +
+  scale_x_continuous(labels = comma, limits = c(0, NA)) +
+  coord_cartesian(ylim = c(0, NA)) +
+  ggtitle("Distribución de Dantas según la Altura") +
+  xlab("Altura (m)") +
+  ylab("Frecuencia") +
+  labs(caption = "Fuente: Global Biodiversity Information Facility") +
+  theme_minimal()
+
+# gráfico interactivo con plotly
+ggplotly(histograma_elevacion, tooltip = "text") |> 
+  config(locale = 'es')
+
+```
+
+## Mapa de la altura de las observaciones de Dantas
+
+
+```{r}
+#| label: altituddantas
+#| message: false
+#| warning: false
+#| collapse: true
+# Mapa de altitudes
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>  
+  addCircleMarkers(
+    data = elevacion,
+    ~longitude, ~latitude, 
+    stroke = FALSE,
+    radius = 3,
+    fillColor = "brown",
+    fillOpacity = 1,
+    popup = ~paste(
+      paste0("<strong>País: </strong>", country),
+      paste0("<strong>Localidad: </strong>", locality),
+      paste0("<strong>Fecha: </strong>", eventDate),
+      paste0("<strong>Fuente: </strong>", institutionCode),
+      paste0("<strong>Altitud: </strong>", elevation_geonames),
+      paste0("<a href='", occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Tapirus bairdii"
+  ) |>
+  addLayersControl(
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c("Registros de Tapirus bairdii")
+  )
+```
+
+
+## Distribución de la Danta Centroamericana
+
+```{r}
+#| label: mapa
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Mapa
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>  
+  addCircleMarkers(
+    # capa de registros de presencia (puntos)
+    data = presencia,
+    stroke = F,
+    radius = 3,
+    fillColor = 'brown',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", presencia$country),
+      paste0("<strong>Localidad: </strong>", presencia$locality),
+      paste0("<strong>Fecha: </strong>", presencia$eventDate),
+      paste0("<strong>Fuente: </strong>", presencia$institutionCode),
+      paste0("<a href='", presencia$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Tapirus bairdii"
+  ) |>
+  addLayersControl(
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c("Registros de Tapirus bairdii"))
+```
+
+## Obtencion de variables climaticas
+
+```{r}
+#| label: datosclimaticos
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Consulta a WorldClim
+clima <- worldclim_global(var = 'bio', res = 10, path = tempdir())
+
+# Nombres de las variables climáticas
+names(clima)
+
+
+```
+
+## Obtención de datos de altitud del paquete Geodata (elevation_global)
+
+```{r}
+#| label: datos_altitud
+#| message: false
+#| warning: false
+#| collapse: true
+
+#Función elevation_global de geodata para obtener datos de altitud
+altitud <- elevation_global(res=10, path= tempdir())
+
+#Asignación del nombre de la variable de elevación
+names (altitud)
+```
+
+::: callout-note
+Es importarte el dato de la altura ya que las dantas centroamericanas suelen vivir en ambientes hasta 1000 metros de altura .
+:::
+
+## Definición de área de estudio
+
+```{r}
+#| label: areaestudio
+#| message: false
+#| warning: false
+#| collapse: true
+# Definir la extensión del área de estudio
+area_estudio <- ext(
+  min(presencia$decimalLongitude) - 5, 
+  max(presencia$decimalLongitude) + 5,
+  min(presencia$decimalLatitude) - 5, 
+  max(presencia$decimalLatitude) + 5
+)
+
+# Recortar las variables bioclimáticas al área de estudio
+clima <- crop(clima, area_estudio)
+altitud <- crop(altitud, area_estudio)
+```
+
+## Cartografía de variables y presencias
+
+```{r}
+
+#| label: colores
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Paleta de colores de temperatura
+colores_temperatura <- colorNumeric(
+  # palette = "inferno",
+  # palette = "magma",
+  palette = rev(brewer.pal(11, "RdYlBu")),
+  values(clima$wc2.1_10m_bio_1),
+  na.color = "transparent"
+)
+
+# Paleta de colores de precipitación
+colores_precipitacion <- colorNumeric(
+  # palette = "viridis",
+  # palette = "YlGnBu",  
+  palette = "Blues",
+  values(clima$wc2.1_10m_bio_12),
+  na.color = "transparent"
+)
+
+# Paleta de colores de altitud
+
+colores_altitud <- colorNumeric(
+  palette = "YlOrBr",
+  values(altitud$wc2.1_10m_elev),
+  na.color = "transparent"
+)
+```
+
+```{r}
+#| label: mapapresencia
+#| message: false
+#| warning: false
+#| collapse: true
+
+
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addRasterImage(
+    altitud$wc2.1_10m_elev,
+    colors = colores_altitud,
+    opacity = 0.6,
+    group = "Altitud"
+  ) |>
+  addRasterImage(
+    clima$wc2.1_10m_bio_1,
+    colors = colores_temperatura,
+    opacity = 0.6,
+    group = "Temperatura"
+  ) |>
+  addRasterImage(
+    clima$wc2.1_10m_bio_12,
+    colors = colores_precipitacion,
+    opacity = 0.6,
+    group = "Precipitación"
+  ) |>
+  addCircleMarkers(
+    data = presencia,
+    stroke = F,
+    radius = 3,
+    fillColor = 'black',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", presencia$country),
+      paste0("<strong>Localidad: </strong>", presencia$locality),
+      paste0("<strong>Fecha: </strong>", presencia$eventDate),
+      paste0("<strong>Fuente: </strong>", presencia$institutionCode),
+      paste0("<a href='", presencia$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Tapirus bairdii"
+  ) |>
+  showGroup("Registros de Tapirus bairdii") |> 
+  addLegend(
+    title = "Altitud",
+    values = values(altitud$wc2.1_10m_elev),
+    pal = colores_altitud,
+    position = "bottomleft",
+    group = "Altitud"
+  ) |>
+  addLegend(
+    title = "Temperatura",
+    values = values(clima$wc2.1_10m_bio_1),
+    pal = colores_temperatura,
+    position = "bottomleft",
+    group = "Temperatura"
+  ) |>
+  addLegend(
+    title = "Precipitación",
+    values = values(clima$wc2.1_10m_bio_12),
+    pal = colores_precipitacion,
+    position = "bottomleft",
+    group = "Precipitación"
+  ) |>
+  addLayersControl(
+    # control de capas
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c("Temperatura", "Precipitación","Altitud", "Registros de Tapirus bairdii")
+  ) |>
+  hideGroup("Precipitación")
+
+
+```
+
+## Modelo Maxent: entrenamiento y predicción
+
+```{r}
+#| label: modeloentrenamiento
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Crear dataframe con columnas de longitud y latitud
+coordenadas_presencia <- data.frame(
+  decimalLongitude = presencia$decimalLongitude,
+  decimalLatitude = presencia$decimalLatitude
+)
+
+# Eliminar coordenadas duplicadas
+coordenadas_presencia <- unique(coordenadas_presencia)
+
+# Establecer una "semilla" para garantizar que la selección aleatoria sea reproducible
+set.seed(123)
+
+# Cantidad de registros de presencia
+n_presencia <- nrow(coordenadas_presencia)
+
+# Con sample(), se selecciona aleatoriamente una proporción (ej. 0.7) 
+# de los índices de los datos de presencia para el conjunto de entrenamiento
+indices_entrenamiento <- sample(
+  1:n_presencia, 
+  size = round(0.7 * n_presencia)
+)
+
+# Crear el subconjunto de entrenamiento utilizando los índices seleccionados
+entrenamiento <- coordenadas_presencia[indices_entrenamiento, ]
+
+# Crear el subconjunto de evaluación con los datos restantes
+evaluacion <- coordenadas_presencia[-indices_entrenamiento, ]
+
+```
+
+```{r}
+#| label: algoritmo2
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Los datos de clima deben convertirse al formato que usa el paquete raster
+# debido a es este el que acepta el paquete dismo
+clima <- raster::stack(clima)
+altitud <- raster::stack(altitud)
+
+# Crear un stack combinado de clima y altitud
+variables_modelo <- stack(clima, altitud)
+
+# Ejecutar el modelo
+modelo_maxent <- maxent(x = variables_modelo, p = entrenamiento)
+
+# Aplicar el modelo entrenado a las variables climáticas 
+# para generar un mapa de idoneidad del hábitat
+prediccionA <- predict(modelo_maxent, variables_modelo)
+```
+
+## Evaluación del modelo
+
+```{r}
+#| label: evaluacion
+#| message: false
+#| warning: false
+#| collapse: true
+
+# terra::extract() extrae los valores del raster de predicción 
+# en las coordenadas de evaluación
+# eval_pres almacena los valores de idoneidad predichos 
+# en los puntos de evaluación de presencia
+eval_pres <- terra::extract(
+  prediccionA,
+  evaluacion[, c('decimalLongitude', 'decimalLatitude')]
+)
+
+# Generar puntos aleatorios dentro del área de estudio definida. 
+# Estos puntos se asumen como ausencias de la especie.
+ausencias <- randomPoints(mask = clima, n = 1000)
+
+# eval_aus almacena los valores de idoneidad predichos
+# en los puntos de ausencia
+eval_aus <- terra::extract(
+  prediccionA, 
+  ausencias
+)
+
+# Generar estadísticas de evaluación del modelo
+resultado_evaluacion <- evaluate(p = eval_pres, a = eval_aus)
+```
+
+```{r}
+
+#| label: graficoroc
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Datos para graficar la curva ROC
+datos_roc <- data.frame(
+  FPR = resultado_evaluacion@FPR,
+  TPR = resultado_evaluacion@TPR,
+  Umbral = resultado_evaluacion@t
+)
+
+# Valor AUC
+auc <- resultado_evaluacion@auc
+
+# Gráfico ggplot2
+grafico_ggplot2 <-
+  ggplot(
+    datos_roc, 
+    aes(
+      x = FPR, 
+      y = TPR,
+      u = Umbral
+    )
+  ) +
+  geom_line(
+    color = "blue", 
+    size = 1
+  ) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = paste("Curva ROC (AUC =", round(auc, 3), ")"),
+       x = "Tasa de falsos positivos (FPR)",
+       y = "Tasa de verdaderos positivos (TPR)") +
+  theme_minimal()
+
+# Gráfico plotly
+ggplotly(grafico_ggplot2) |> 
+  config(locale = 'es')
+```
+
+## Mapa binario de presencias y ausencias
+
+```{r}
+#| label: mapabinario
+#| message: false
+#| warning: false
+#| collapse: true
+
+# Paleta de colores del modelo
+colores_modelo <- colorNumeric(
+  palette = c("white", "black"),
+  values(prediccionA),
+  na.color = "transparent"
+)
+
+# Mapa
+leaflet() |>
+  addTiles(group = "Mapa general") |>
+  addProviderTiles(
+    providers$Esri.WorldImagery, 
+    group = "Imágenes satelitales"
+  ) |>  
+  addProviderTiles(
+    providers$CartoDB.Positron, 
+    group = "Mapa blanco"
+  ) |>
+  addRasterImage(
+    altitud$wc2.1_10m_elev,
+    colors = colores_altitud,
+    opacity = 0.6,
+    group = "Altitud"
+  ) |>
+  addRasterImage( # capa raster de temperatura
+    clima$wc2.1_10m_bio_1,
+    colors = colores_temperatura, # paleta de colores
+    opacity = 0.6,
+    group = "Temperatura",
+  ) |>
+  addRasterImage( # capa raster de precipitación
+    clima$wc2.1_10m_bio_12,
+    colors = colores_precipitacion, # paleta de colores
+    opacity = 0.6,
+    group = "Precipitación",
+  ) |>
+  addRasterImage( # capa raster del modelo de distribución
+    prediccionA,
+    colors = colores_modelo,
+    opacity = 0.6,
+    group = "Modelo de distribución",
+  ) |>  
+  addCircleMarkers(
+    # capa de registros de presencia (puntos)
+    data = presencia,
+    stroke = F,
+    radius = 3,
+    fillColor = 'brown',
+    fillOpacity = 1,
+    popup = paste(
+      paste0("<strong>País: </strong>", presencia$country),
+      paste0("<strong>Localidad: </strong>", presencia$locality),
+      paste0("<strong>Fecha: </strong>", presencia$eventDate),
+      paste0("<strong>Fuente: </strong>", presencia$institutionCode),
+      paste0("<a href='", presencia$occurrenceID, "'>Más información</a>"),
+      sep = '<br/>'
+    ),
+    group = "Registros de Tapirus bairdii"
+  ) |>  
+  addLegend(
+    title = "Temperatura",
+    values = values(clima$wc2.1_10m_bio_1),
+    pal = colores_temperatura,
+    position = "bottomleft",
+    group = "Temperatura"
+  ) |>
+  addLegend(
+    title = "Precipitación",
+    values = values(clima$wc2.1_10m_bio_12),
+    pal = colores_precipitacion,
+    position = "bottomleft",
+    group = "Precipitación"
+  ) |>
+   addLegend(
+    title = "Altitud",
+    values = values(altitud$wc2.1_10m_elev),
+    pal = colores_altitud,
+    position = "bottomleft",
+    group = "Altitud"
+  ) |>
+  addLegend(
+    title = "Modelo de distribución",
+    values = values(prediccionA),
+    pal = colores_modelo,
+    position = "bottomright",
+    group = "Modelo de distribución"
+  ) |>  
+  addLayersControl(
+    # control de capas
+    baseGroups = c("Mapa general", "Imágenes satelitales", "Mapa blanco"),
+    overlayGroups = c(
+      "Temperatura",
+      "Precipitación",
+      "Altitud",
+      "Modelo de distribución",
+      "Registros de Tapirus bairdii"
+    )
+  ) |>
+  hideGroup("Temperatura") |>
+  hideGroup("Precipitación") |>
+  hideGroup("Altitud")
+
+```
+
+::: callout-note
+El gráfico presentado es una curva ROC (Receiver Operating Characteristic) que evalúa el desempeño de un modelo de clasificación. El área bajo la curva (AUC) es 0.986, lo cual indica que el modelo tiene un desempeño excelente, ya que un AUC cercano a 1 representa un modelo altamente discriminativo (capaz de diferenciar correctamente entre las clases).
+
+Explicación del gráfico
+-Tasa de verdaderos positivos (TPR o Sensibilidad): Es la proporción de positivos correctamente identificados por el modelo.
+-Tasa de falsos positivos (FPR): Es la proporción de negativos que el modelo clasifica incorrectamente como positivos.
+-Línea roja (diagonal): Representa un modelo aleatorio que no discrimina entre las clases (AUC = 0.5).
+-Curva azul: Muestra el desempeño del modelo. Cuanto más cerca de la esquina superior izquierda (0,1) esté, mejor es el desempeño.
+-En este caso, el modelo tiene una alta sensibilidad y un bajo nivel de falsos positivos, lo cual lo hace adecuado para tareas donde los errores en clasificar positivos son críticos.
+:::
